@@ -102,6 +102,19 @@ where
     {
         exec_insert_with_returning::<A, _>(self.primary_key, self.query, enforce_return, db)
     }
+
+    /// Execute many insert operations and return the inserted model (use `RETURNING` syntax if database supported)
+    pub fn exec_insert_many_with_returning<'a, C>(
+        self,
+        db: &'a C,
+    ) -> impl Future<Output = Result<Vec<<A::Entity as EntityTrait>::Model>, DbErr>> + '_
+    where
+        <A::Entity as EntityTrait>::Model: IntoActiveModel<A>,
+        C: ConnectionTrait,
+        A: 'a,
+    {
+        exec_insert_many_with_returning::<A, _>(self.query, db)
+    }
 }
 
 async fn exec_insert<A, C>(
@@ -183,5 +196,38 @@ where
             true => Err(DbErr::Exec("Failed to find inserted item".to_owned())),
             false => Ok(None)
         }
+    }
+}
+
+async fn exec_insert_many_with_returning<A, C>(
+    mut insert_statement: InsertStatement,
+    db: &C,
+) -> Result<Vec<<A::Entity as EntityTrait>::Model>, DbErr>
+where
+    <A::Entity as EntityTrait>::Model: IntoActiveModel<A>,
+    C: ConnectionTrait,
+    A: ActiveModelTrait,
+{
+    let db_backend = db.get_database_backend();
+    match db.support_returning() {
+        true => {
+            let mut returning = Query::select();
+            returning.exprs(<A::Entity as EntityTrait>::Column::iter().map(|c| {
+                let col = Expr::col(c);
+                let col_def = ColumnTrait::def(&c);
+                let col_type = col_def.get_column_type();
+                match col_type.get_enum_name() {
+                    Some(_) => col.as_enum(Alias::new("text")),
+                    None => col.into(),
+                }
+            }));
+            insert_statement.returning(returning);
+            Ok(SelectorRaw::<SelectModel<<A::Entity as EntityTrait>::Model>>::from_statement(
+                db_backend.build(&insert_statement),
+            )
+            .all(db)
+            .await?)
+        }
+        false => todo!("Database does not support 'returning'")
     }
 }
