@@ -64,6 +64,19 @@ where
     {
         Inserter::<A>::new(self.primary_key, self.query).exec_with_returning(enforce_return, db)
     }
+
+    /// Execute an insert operation and return the inserted models (use `RETURNING` syntax)
+    pub fn exec_many_with_returning<'a, C>(
+        self,
+        db: &'a C,
+    ) -> impl Future<Output = Result<Vec<<A::Entity as EntityTrait>::Model>, DbErr>> + '_
+    where
+        <A::Entity as EntityTrait>::Model: IntoActiveModel<A>,
+        C: ConnectionTrait,
+        A: 'a,
+    {
+        Inserter::<A>::new(self.primary_key, self.query).exec_insert_many_with_returning(db)
+    }
 }
 
 impl<A> Inserter<A>
